@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -28,22 +29,26 @@ var conversations = make(map[int64]*Conversation)
 // Global bot variable
 var bot *tgbotapi.BotAPI
 
-const BOT_TOKEN string = "TamyrZaimbot"
-
 func main() {
-	// Get BOT_TOKEN from environment variable.
-	_ = os.Setenv(BOT_TOKEN, "7694442474:AAHrnMXRFyaf3jzLmMBBO0wGiZdK873dxvM")
-	botToken := os.Getenv(BOT_TOKEN)
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	// Get BOT_TOKEN from environment variable
+	botToken := os.Getenv("BOT_TOKEN")
 	if botToken == "" {
 		log.Fatal("BOT_TOKEN environment variable not set.")
 	}
 
-	var err error
-	bot, err = tgbotapi.NewBotAPI(botToken)
-	if err != nil {
-		log.Fatalf("Error creating bot: %v", err)
+	// ✅ Initialize the Telegram bot
+	var errBot error
+	bot, errBot = tgbotapi.NewBotAPI(botToken) // <== This was missing
+	if errBot != nil {
+		log.Fatalf("Failed to initialize bot: %v", errBot)
 	}
-	log.Printf("Authorized on account %s", bot.Self.UserName)
+
+	log.Println("Bot token loaded successfully")
 
 	// Open SQLite database.
 	db, err := sql.Open("sqlite3", "./lending.db")
