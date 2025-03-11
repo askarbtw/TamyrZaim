@@ -11,7 +11,7 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // Conversation holds details for multi-step interactions.
@@ -50,7 +50,7 @@ func main() {
 	log.Println("Bot token loaded successfully")
 
 	// Open SQLite database.
-	db, err := sql.Open("sqlite3", "./lending.db")
+	db, err := sql.Open("sqlite", "./lending.db")
 	if err != nil {
 		log.Fatalf("Error opening DB: %v", err)
 	}
