@@ -11,7 +11,6 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -30,10 +29,10 @@ var conversations = make(map[int64]*Conversation)
 var bot *tgbotapi.BotAPI
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
+	//err := godotenv.Load()
+	//if err != nil {
+	//	log.Fatal("Error loading .env file")
+	//}
 
 	// Get BOT_TOKEN from environment variable
 	botToken := os.Getenv("BOT_TOKEN")
