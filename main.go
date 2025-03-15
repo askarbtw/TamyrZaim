@@ -680,6 +680,25 @@ func (m *BotManager) HandleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	case strings.HasPrefix(data, "edit_name_"):
 		// Extract loan ID from callback data (format: "edit_name_123")
 		loanIDStr := strings.TrimPrefix(data, "edit_name_")
+		log.Printf("Editing name: original callback data=%s, extracted ID=%s", data, loanIDStr)
+
+		// Validate the loan ID
+		loanID, err := strconv.Atoi(loanIDStr)
+		if err != nil {
+			log.Printf("Error converting loan ID: %v", err)
+			m.SendMessage(chatID, "❌ Произошла ошибка при выборе займа.")
+			m.ShowMainMenu(chatID)
+			return
+		}
+
+		// Verify the loan exists
+		_, err = m.GetLoanByID(chatID, loanID)
+		if err != nil {
+			log.Printf("Error verifying loan: %v", err)
+			m.SendMessage(chatID, "❌ Займ не найден.")
+			m.ShowMainMenu(chatID)
+			return
+		}
 
 		// Save the loan ID and set the operation state
 		m.SaveStateData(chatID, "loan_id", loanIDStr)
@@ -692,6 +711,25 @@ func (m *BotManager) HandleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	case strings.HasPrefix(data, "edit_amount_"):
 		// Extract loan ID from callback data (format: "edit_amount_123")
 		loanIDStr := strings.TrimPrefix(data, "edit_amount_")
+		log.Printf("Editing amount: original callback data=%s, extracted ID=%s", data, loanIDStr)
+
+		// Validate the loan ID
+		loanID, err := strconv.Atoi(loanIDStr)
+		if err != nil {
+			log.Printf("Error converting loan ID: %v", err)
+			m.SendMessage(chatID, "❌ Произошла ошибка при выборе займа.")
+			m.ShowMainMenu(chatID)
+			return
+		}
+
+		// Verify the loan exists
+		_, err = m.GetLoanByID(chatID, loanID)
+		if err != nil {
+			log.Printf("Error verifying loan: %v", err)
+			m.SendMessage(chatID, "❌ Займ не найден.")
+			m.ShowMainMenu(chatID)
+			return
+		}
 
 		// Save the loan ID and set the operation state
 		m.SaveStateData(chatID, "loan_id", loanIDStr)
@@ -704,6 +742,25 @@ func (m *BotManager) HandleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	case strings.HasPrefix(data, "edit_purpose_"):
 		// Extract loan ID from callback data (format: "edit_purpose_123")
 		loanIDStr := strings.TrimPrefix(data, "edit_purpose_")
+		log.Printf("Editing purpose: original callback data=%s, extracted ID=%s", data, loanIDStr)
+
+		// Validate the loan ID
+		loanID, err := strconv.Atoi(loanIDStr)
+		if err != nil {
+			log.Printf("Error converting loan ID: %v", err)
+			m.SendMessage(chatID, "❌ Произошла ошибка при выборе займа.")
+			m.ShowMainMenu(chatID)
+			return
+		}
+
+		// Verify the loan exists
+		_, err = m.GetLoanByID(chatID, loanID)
+		if err != nil {
+			log.Printf("Error verifying loan: %v", err)
+			m.SendMessage(chatID, "❌ Займ не найден.")
+			m.ShowMainMenu(chatID)
+			return
+		}
 
 		// Save the loan ID and set the operation state
 		m.SaveStateData(chatID, "loan_id", loanIDStr)
@@ -1431,6 +1488,16 @@ func (m *BotManager) HandleEditLoanStep(chatID int64, text string) {
 
 	// Get stored loan ID and edit field
 	loanIDStr, _ := m.GetStateData(chatID, "loan_id")
+
+	// Check if the loan ID string contains a prefix that needs to be removed
+	if strings.Contains(loanIDStr, "amount_") {
+		loanIDStr = strings.TrimPrefix(loanIDStr, "amount_")
+	} else if strings.Contains(loanIDStr, "name_") {
+		loanIDStr = strings.TrimPrefix(loanIDStr, "name_")
+	} else if strings.Contains(loanIDStr, "purpose_") {
+		loanIDStr = strings.TrimPrefix(loanIDStr, "purpose_")
+	}
+
 	loanID, err := strconv.Atoi(loanIDStr)
 	if err != nil {
 		log.Printf("Error converting loan ID: %v", err)
