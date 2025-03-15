@@ -188,17 +188,17 @@ func (m *BotManager) HandleAddLoanStep(chatID int64, text string) {
 		// Save borrower name and move to next step
 		m.SaveStateData(chatID, "borrower_name", text)
 		m.SetState(chatID, OpAddLoan, 1)
-		m.SendMessage(chatID, "💰 Введите сумму займа (например, 100.50):")
+		m.SendMessage(chatID, "💰 Введите сумму займа:")
 
 	case 1: // Getting loan amount
-		amount, err := strconv.ParseFloat(text, 64)
+		amount, err := strconv.ParseInt(text, 10, 64)
 		if err != nil {
-			m.SendMessage(chatID, "❌ Некорректная сумма. Пожалуйста, введите корректное число (например, 100.50):")
+			m.SendMessage(chatID, "❌ Некорректная сумма. Пожалуйста, введите целое число:")
 			return
 		}
 
 		// Save amount and move to next step
-		m.SaveStateData(chatID, "amount", fmt.Sprintf("%.2f", amount))
+		m.SaveStateData(chatID, "amount", fmt.Sprintf("%d", amount))
 		m.SetState(chatID, OpAddLoan, 2)
 		m.SendMessage(chatID, "📝 Введите цель займа:")
 
@@ -296,7 +296,7 @@ func (m *BotManager) HandleRepayStep(chatID int64, text string) {
 
 		// Get loan details for confirmation
 		var borrowerName string
-		var amount float64
+		var amount int64
 		err = m.db.QueryRow(
 			"SELECT borrower_name, amount FROM loans WHERE loan_id = ? AND user_id = ?",
 			id, chatID,
@@ -316,7 +316,7 @@ func (m *BotManager) HandleRepayStep(chatID int64, text string) {
 				"📌 Подтверждаем возврат займа:\n\n"+
 					"🆔 ID займа: %d\n"+
 					"👤 Заемщик: %s\n"+
-					"💰 Сумма: %.2f ₸\n\n"+
+					"💰 Сумма: %d ₸\n\n"+
 					"✅ Займ отмечен как возвращенный!",
 				id, borrowerName, amount,
 			)
@@ -350,14 +350,14 @@ func (m *BotManager) ShowBalance(chatID int64) {
 	var response strings.Builder
 	response.WriteString("📊 Активные займы:\n\n")
 
-	var totalAmount float64
+	var totalAmount int64
 	loanCount := 0
 
 	// Process each loan
 	for rows.Next() {
 		var id int
 		var borrower string
-		var amount float64
+		var amount int64
 
 		if err := rows.Scan(&id, &borrower, &amount); err != nil {
 			log.Printf("Error scanning loan row: %v", err)
@@ -368,7 +368,7 @@ func (m *BotManager) ShowBalance(chatID int64) {
 		loanCount++
 
 		response.WriteString(fmt.Sprintf(
-			"🆔 Займ #%d\n👤 Заемщик: %s\n💰 Сумма: %.2f ₸\n➖➖➖➖➖➖➖➖➖➖\n\n",
+			"🆔 Займ #%d\n👤 Заемщик: %s\n💰 Сумма: %d ₸\n➖➖➖➖➖➖➖➖➖➖\n\n",
 			id, borrower, amount,
 		))
 	}
@@ -377,7 +377,7 @@ func (m *BotManager) ShowBalance(chatID int64) {
 	if loanCount == 0 {
 		response.WriteString("У вас нет активных займов! 🎉")
 	} else {
-		response.WriteString(fmt.Sprintf("💼 Общая сумма активных займов: %.2f ₸", totalAmount))
+		response.WriteString(fmt.Sprintf("💼 Общая сумма активных займов: %d ₸", totalAmount))
 	}
 
 	// Send response
@@ -387,7 +387,7 @@ func (m *BotManager) ShowBalance(chatID int64) {
 // ShowStats displays lending statistics
 func (m *BotManager) ShowStats(chatID int64) {
 	var totalLoans int
-	var totalLent float64
+	var totalLent int64
 	var totalRepaid int
 
 	// Get total loans and amount
@@ -418,7 +418,7 @@ func (m *BotManager) ShowStats(chatID int64) {
 	stats := fmt.Sprintf(
 		"📈 Статистика займов:\n\n"+
 			"🔢 Всего займов: %d\n"+
-			"💰 Всего выдано: %.2f ₸\n"+
+			"💰 Всего выдано: %d ₸\n"+
 			"✅ Возвращено займов: %d\n"+
 			"⏳ Ожидают возврата: %d\n\n"+
 			"〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️",
@@ -553,14 +553,14 @@ func (m *BotManager) SendReminders() {
 		for loanRows.Next() {
 			var id int
 			var borrower string
-			var amount float64
+			var amount int64
 
 			if err := loanRows.Scan(&id, &borrower, &amount); err != nil {
 				log.Printf("Error scanning loan: %v", err)
 				continue
 			}
 
-			reminderMsg += fmt.Sprintf("🆔 Займ #%d - %s: %.2f ₸\n", id, borrower, amount)
+			reminderMsg += fmt.Sprintf("🆔 Займ #%d - %s: %d ₸\n", id, borrower, amount)
 		}
 		loanRows.Close()
 
@@ -609,7 +609,7 @@ func initializeDatabase(db *sql.DB) error {
 		user_id INTEGER NOT NULL,
 		loan_id INTEGER NOT NULL,
 		borrower_name TEXT NOT NULL,
-		amount REAL NOT NULL,
+		amount INTEGER NOT NULL,
 		purpose TEXT,
 		repaid BOOLEAN DEFAULT 0,
 		PRIMARY KEY (user_id, loan_id)
