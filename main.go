@@ -79,7 +79,16 @@ func main() {
 	u.Timeout = 60
 	updates := bot.GetUpdatesChan(u)
 
+	// Track last processed update ID to prevent duplicates
+	var lastUpdateID int
+
 	for update := range updates {
+		// Skip already processed updates to prevent duplicates
+		if update.UpdateID <= lastUpdateID {
+			continue
+		}
+		lastUpdateID = update.UpdateID
+
 		if update.CallbackQuery != nil {
 			handleCallbackQuery(bot, db, update.CallbackQuery)
 			continue
@@ -123,7 +132,10 @@ func handleConversationInput(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, tex
 		return
 	}
 
-	switch conv.Operation {
+	// Make a copy of current operation to avoid race conditions
+	op := conv.Operation
+
+	switch op {
 	case "addloan":
 		handleAddLoanStep(bot, db, chatID, text, conv)
 	case "repay":
@@ -135,6 +147,10 @@ func handleConversationInput(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, tex
 
 // handleAddLoanStep processes each step of adding a loan.
 func handleAddLoanStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text string, conv *Conversation) {
+	// Lock the conversation to prevent race conditions
+	convMutex.Lock()
+	defer convMutex.Unlock()
+
 	switch conv.Step {
 	case 0:
 		// Ask for borrower's name.
@@ -191,16 +207,22 @@ func handleAddLoanStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text stri
 			newLoanID,
 		)
 		sendMessage(bot, chatID, successMsg)
-		endConversation(chatID)
+
+		// Delete conversation BEFORE sending main menu to prevent race conditions
+		delete(conversations, chatID)
 		sendMainMenu(bot, chatID)
 	default:
 		sendMessage(bot, chatID, "❌ Произошла ошибка в процессе добавления займа. Пожалуйста, попробуйте снова.")
-		endConversation(chatID)
+		delete(conversations, chatID)
 	}
 }
 
 // handleRepayStep processes each step of recording a repayment.
 func handleRepayStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text string, conv *Conversation) {
+	// Lock the conversation to prevent race conditions
+	convMutex.Lock()
+	defer convMutex.Unlock()
+
 	switch conv.Step {
 	case 0:
 		// Ask for Loan ID to mark as repaid.
@@ -209,7 +231,6 @@ func handleRepayStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text string
 			return
 		}
 		conv.Data["loan_id"] = text
-		conv.Step++
 		id, err := strconv.Atoi(text)
 		if err != nil {
 			sendMessage(bot, chatID, "❌ Некорректный ID займа. Пожалуйста, введите корректное число:")
@@ -221,7 +242,8 @@ func handleRepayStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text string
 		err = row.Scan(&exists)
 		if err != nil || !exists {
 			sendMessage(bot, chatID, "❌ Займ не найден или уже был возвращен. Пожалуйста, попробуйте снова с корректным ID займа.")
-			endConversation(chatID)
+			delete(conversations, chatID)
+			sendMainMenu(bot, chatID)
 			return
 		}
 
@@ -256,11 +278,12 @@ func handleRepayStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text string
 			sendMessage(bot, chatID, fmt.Sprintf("✅ Займ с ID %d отмечен как возвращенный!", id))
 		}
 
-		endConversation(chatID)
+		// Delete conversation BEFORE sending main menu
+		delete(conversations, chatID)
 		sendMainMenu(bot, chatID)
 	default:
 		sendMessage(bot, chatID, "❌ Произошла ошибка в процессе регистрации возврата. Пожалуйста, попробуйте снова.")
-		endConversation(chatID)
+		delete(conversations, chatID)
 	}
 }
 
@@ -299,22 +322,24 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, db *sql.DB, cq *tgbotapi.Callback
 	data := cq.Data
 	chatID := cq.Message.Chat.ID
 
+	// First respond to the callback to stop "loading" indicator
+	bot.Request(tgbotapi.NewCallback(cq.ID, ""))
+
 	switch data {
 	case "menu_addloan":
+		// Clear any existing conversation before starting a new one
+		endConversation(chatID)
 		startAddLoanConversation(chatID)
-		bot.Request(tgbotapi.NewCallback(cq.ID, "Начинаем запись займа..."))
 	case "menu_repay":
+		// Clear any existing conversation before starting a new one
+		endConversation(chatID)
 		startRepayConversation(chatID)
-		bot.Request(tgbotapi.NewCallback(cq.ID, "Начинаем запись возврата..."))
 	case "menu_balance":
 		showBalance(bot, db, chatID)
-		bot.Request(tgbotapi.NewCallback(cq.ID, "Получаем ваш баланс..."))
 	case "menu_stats":
 		showStats(bot, db, chatID)
-		bot.Request(tgbotapi.NewCallback(cq.ID, "Получаем вашу статистику..."))
 	default:
 		sendMessage(bot, chatID, "❌ Неизвестная опция. Попробуйте снова.")
-		bot.Request(tgbotapi.NewCallback(cq.ID, "Выбрана неизвестная опция."))
 	}
 }
 
