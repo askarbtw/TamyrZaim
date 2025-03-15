@@ -34,15 +34,15 @@ const (
 	MenuSearch  = "menu_search"
 
 	// Sub-menu callback data
-	SubMenuEdit       = "submenu_edit"
-	SubMenuDelete     = "submenu_delete"
-	SubMenuPartial    = "submenu_partial"
-	SubMenuRepayments = "submenu_repayments"
+	SubMenuEdit       = "menu_edit_loan"
+	SubMenuDelete     = "menu_delete_loan"
+	SubMenuPartial    = "menu_partial_repay"
+	SubMenuRepayments = "menu_repayment_history"
 
 	// Search sub-menu callback data
 	SearchByName   = "search_by_name"
 	SearchByStatus = "search_by_status"
-	SearchAll      = "search_all"
+	SearchAll      = "search_all_loans"
 )
 
 // UserState manages the state for a single user
@@ -433,6 +433,7 @@ func (m *BotManager) ShowBalance(chatID int64) {
 	if err != nil {
 		log.Printf("Error querying loans: %v", err)
 		m.SendMessage(chatID, fmt.Sprintf("❌ Ошибка при получении баланса: %v", err))
+		m.ShowMainMenu(chatID)
 		return
 	}
 	defer rows.Close()
@@ -473,6 +474,7 @@ func (m *BotManager) ShowBalance(chatID int64) {
 
 	// Send response
 	m.SendMessage(chatID, response.String())
+	m.ShowMainMenu(chatID)
 }
 
 // ShowStats displays lending statistics
@@ -490,6 +492,7 @@ func (m *BotManager) ShowStats(chatID int64) {
 	if err != nil {
 		log.Printf("Error getting loan stats: %v", err)
 		m.SendMessage(chatID, fmt.Sprintf("❌ Ошибка при формировании статистики: %v", err))
+		m.ShowMainMenu(chatID)
 		return
 	}
 
@@ -502,6 +505,7 @@ func (m *BotManager) ShowStats(chatID int64) {
 	if err != nil {
 		log.Printf("Error getting repaid count: %v", err)
 		m.SendMessage(chatID, fmt.Sprintf("❌ Ошибка при формировании статистики: %v", err))
+		m.ShowMainMenu(chatID)
 		return
 	}
 
@@ -521,6 +525,7 @@ func (m *BotManager) ShowStats(chatID int64) {
 
 	// Send stats
 	m.SendMessage(chatID, stats)
+	m.ShowMainMenu(chatID)
 }
 
 // ShowLoanManagementMenu displays options for managing loans
@@ -588,6 +593,9 @@ func (m *BotManager) HandleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	data := callback.Data
 	chatID := callback.Message.Chat.ID
 
+	// Log the callback data for debugging
+	log.Printf("Received callback: %s", data)
+
 	// Switch based on the callback data
 	switch {
 	case data == MenuAddLoan:
@@ -608,19 +616,19 @@ func (m *BotManager) HandleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		m.ShowSearchMenu(chatID)
 	case data == "back_to_main":
 		m.ShowMainMenu(chatID)
-	case data == "menu_edit_loan":
+	case data == SubMenuEdit:
 		m.StartEditLoanFlow(chatID)
-	case data == "menu_delete_loan":
+	case data == SubMenuDelete:
 		m.StartDeleteLoanFlow(chatID)
-	case data == "menu_partial_repay":
+	case data == SubMenuPartial:
 		m.StartPartialRepaymentFlow(chatID)
-	case data == "menu_repayment_history":
+	case data == SubMenuRepayments:
 		m.ShowRepaymentHistory(chatID)
-	case data == "search_by_name":
+	case data == SearchByName:
 		m.StartSearchByNameFlow(chatID)
-	case data == "search_by_status":
+	case data == SearchByStatus:
 		m.StartSearchByStatusFlow(chatID)
-	case data == "search_all_loans":
+	case data == SearchAll:
 		m.ShowAllLoans(chatID)
 	case data == "status_active":
 		m.ShowLoansByStatus(chatID, false)
@@ -898,6 +906,7 @@ func (m *BotManager) HandleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		m.ShowMainMenu(chatID)
 
 	default:
+		log.Printf("Unknown callback data: %s", data)
 		m.SendMessage(chatID, "❓ Неизвестная команда")
 		m.ShowMainMenu(chatID)
 	}
@@ -1847,7 +1856,7 @@ func (m *BotManager) StartDeleteLoanFlow(chatID int64) {
 		tgbotapi.NewInlineKeyboardButtonData("🔙 Назад", "back_to_manage"),
 	))
 
-	msg := tgbotapi.NewMessage(chatID, "⚠️ ВНИМАНИЕ! Вы собираетесь удалить займ:\n(Внимание: это действие нельзя отменить)")
+	msg := tgbotapi.NewMessage(chatID, "Выберите займ для удаления:")
 	msg.ReplyMarkup = tgbotapi.InlineKeyboardMarkup{InlineKeyboard: keyboard}
 	m.bot.Send(msg)
 
