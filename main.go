@@ -107,9 +107,13 @@ func handleMessage(bot *tgbotapi.BotAPI, db *sql.DB, message *tgbotapi.Message) 
 	chatID := message.Chat.ID
 	text := strings.TrimSpace(message.Text)
 
+	log.Printf("Received message from %d: %s", chatID, text)
+
 	if message.IsCommand() {
 		switch message.Command() {
 		case "start":
+			// Clear any existing conversation when /start is used
+			endConversation(chatID)
 			sendMainMenu(bot, chatID)
 			return
 		default:
@@ -118,7 +122,18 @@ func handleMessage(bot *tgbotapi.BotAPI, db *sql.DB, message *tgbotapi.Message) 
 		}
 	}
 
-	handleConversationInput(bot, db, chatID, text)
+	// Check if user is in an active conversation
+	convMutex.Lock()
+	_, conversationExists := conversations[chatID]
+	convMutex.Unlock()
+
+	if conversationExists {
+		log.Printf("Active conversation exists for user %d, handling input", chatID)
+		handleConversationInput(bot, db, chatID, text)
+	} else {
+		log.Printf("No active conversation for user %d, showing main menu", chatID)
+		sendMainMenu(bot, chatID)
+	}
 }
 
 // handleConversationInput routes user input to the correct conversation handler.
@@ -128,19 +143,20 @@ func handleConversationInput(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, tex
 	convMutex.Unlock()
 
 	if !exists {
+		log.Printf("Error: Conversation not found for user %d in handleConversationInput", chatID)
 		sendMainMenu(bot, chatID)
 		return
 	}
 
-	// Make a copy of current operation to avoid race conditions
-	op := conv.Operation
+	log.Printf("Processing conversation for user %d: operation=%s, step=%d", chatID, conv.Operation, conv.Step)
 
-	switch op {
+	switch conv.Operation {
 	case "addloan":
 		handleAddLoanStep(bot, db, chatID, text, conv)
 	case "repay":
 		handleRepayStep(bot, db, chatID, text, conv)
 	default:
+		log.Printf("Unknown operation: %s for user %d", conv.Operation, chatID)
 		sendMainMenu(bot, chatID)
 	}
 }
@@ -151,6 +167,15 @@ func handleAddLoanStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text stri
 	convMutex.Lock()
 	defer convMutex.Unlock()
 
+	// Double-check the conversation still exists
+	if conv == nil {
+		log.Printf("Error: Conversation is nil for user %d", chatID)
+		sendMainMenu(bot, chatID)
+		return
+	}
+
+	log.Printf("Processing add loan step %d for user %d with input: %s", conv.Step, chatID, text)
+
 	switch conv.Step {
 	case 0:
 		// Ask for borrower's name.
@@ -160,6 +185,7 @@ func handleAddLoanStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text stri
 		}
 		conv.Data["borrower_name"] = text
 		conv.Step++
+		log.Printf("User %d provided borrower name: %s, moving to step 1", chatID, text)
 		sendMessage(bot, chatID, "💰 Введите сумму займа (например, 100.50):")
 	case 1:
 		// Validate and save loan amount.
@@ -170,6 +196,7 @@ func handleAddLoanStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text stri
 		}
 		conv.Data["amount"] = fmt.Sprintf("%.2f", amount)
 		conv.Step++
+		log.Printf("User %d provided loan amount: %.2f, moving to step 2", chatID, amount)
 		sendMessage(bot, chatID, "📝 Введите цель займа:")
 	case 2:
 		// Save purpose and complete recording process.
@@ -178,26 +205,31 @@ func handleAddLoanStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text stri
 			return
 		}
 		conv.Data["purpose"] = text
+		log.Printf("User %d provided loan purpose: %s", chatID, text)
 
 		var newLoanID int
 		err := db.QueryRow("SELECT COALESCE(MAX(loan_id), 0) + 1 FROM loans WHERE user_id = ?", chatID).Scan(&newLoanID)
 		if err != nil {
+			log.Printf("Error generating loan ID for user %d: %v", chatID, err)
 			sendMessage(bot, chatID, fmt.Sprintf("❌ Ошибка при создании ID займа: %v", err))
 			return
 		}
+		log.Printf("Generated new loan ID %d for user %d", newLoanID, chatID)
 
 		// Insert the loan into the database.
 		query := `INSERT INTO loans (user_id, loan_id, borrower_name, amount, purpose, repaid) VALUES (?, ?, ?, ?, ?, 0)`
 		_, err = db.Exec(query, chatID, newLoanID, conv.Data["borrower_name"], conv.Data["amount"], conv.Data["purpose"])
 		if err != nil {
+			log.Printf("Error recording loan for user %d: %v", chatID, err)
 			sendMessage(bot, chatID, fmt.Sprintf("❌ Не удалось зарегистрировать займ: %v", err))
 			return
 		}
+		log.Printf("Successfully recorded loan ID %d for user %d", newLoanID, chatID)
 
 		successMsg := fmt.Sprintf(
 			"✅ Займ успешно зарегистрирован!\n\n"+
 				"👤 Заемщик: %s\n"+
-				"💰 Сумма: %s ₽\n"+
+				"💰 Сумма: %s ₸\n"+
 				"🎯 Цель: %s\n"+
 				"🆔 ID займа: %d\n\n"+
 				"〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️",
@@ -209,11 +241,14 @@ func handleAddLoanStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text stri
 		sendMessage(bot, chatID, successMsg)
 
 		// Delete conversation BEFORE sending main menu to prevent race conditions
+		log.Printf("Ending add loan conversation for user %d", chatID)
 		delete(conversations, chatID)
 		sendMainMenu(bot, chatID)
 	default:
+		log.Printf("Unknown add loan step %d for user %d", conv.Step, chatID)
 		sendMessage(bot, chatID, "❌ Произошла ошибка в процессе добавления займа. Пожалуйста, попробуйте снова.")
 		delete(conversations, chatID)
+		sendMainMenu(bot, chatID)
 	}
 }
 
@@ -222,6 +257,15 @@ func handleRepayStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text string
 	// Lock the conversation to prevent race conditions
 	convMutex.Lock()
 	defer convMutex.Unlock()
+
+	// Double-check the conversation still exists
+	if conv == nil {
+		log.Printf("Error: Conversation is nil for user %d", chatID)
+		sendMainMenu(bot, chatID)
+		return
+	}
+
+	log.Printf("Processing repay step %d for user %d with input: %s", conv.Step, chatID, text)
 
 	switch conv.Step {
 	case 0:
@@ -236,11 +280,14 @@ func handleRepayStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text string
 			sendMessage(bot, chatID, "❌ Некорректный ID займа. Пожалуйста, введите корректное число:")
 			return
 		}
+		log.Printf("User %d provided loan ID: %d for repayment", chatID, id)
+
 		// Check if loan exists and belongs to user.
 		var exists bool
 		row := db.QueryRow("SELECT EXISTS(SELECT 1 FROM loans WHERE loan_id = ? AND user_id = ? AND repaid = 0)", id, chatID)
 		err = row.Scan(&exists)
 		if err != nil || !exists {
+			log.Printf("Loan ID %d not found or already repaid for user %d", id, chatID)
 			sendMessage(bot, chatID, "❌ Займ не найден или уже был возвращен. Пожалуйста, попробуйте снова с корректным ID займа.")
 			delete(conversations, chatID)
 			sendMainMenu(bot, chatID)
@@ -252,26 +299,32 @@ func handleRepayStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text string
 		var amount float64
 		err = db.QueryRow("SELECT borrower_name, amount FROM loans WHERE loan_id = ? AND user_id = ?", id, chatID).Scan(&borrowerName, &amount)
 		if err == nil {
-			confirmMsg := fmt.Sprintf(
-				"📌 Подтверждаем возврат займа:\n\n"+
-					"🆔 ID займа: %d\n"+
-					"👤 Заемщик: %s\n"+
-					"💰 Сумма: %.2f ₽\n\n"+
-					"✅ Займ отмечен как возвращенный!",
-				id, borrowerName, amount,
-			)
+			log.Printf("Found loan ID %d for user %d: borrower=%s, amount=%.2f", id, chatID, borrowerName, amount)
 
 			// Mark the loan as repaid.
 			_, err = db.Exec("UPDATE loans SET repaid = 1 WHERE loan_id = ? AND user_id = ?", id, chatID)
 			if err != nil {
+				log.Printf("Error marking loan %d as repaid: %v", id, err)
 				sendMessage(bot, chatID, fmt.Sprintf("❌ Не удалось отметить займ как возвращенный: %v", err))
 				return
 			}
+
+			confirmMsg := fmt.Sprintf(
+				"📌 Подтверждаем возврат займа:\n\n"+
+					"🆔 ID займа: %d\n"+
+					"👤 Заемщик: %s\n"+
+					"💰 Сумма: %.2f ₸\n\n"+
+					"✅ Займ отмечен как возвращенный!",
+				id, borrowerName, amount,
+			)
 			sendMessage(bot, chatID, confirmMsg)
 		} else {
-			// Mark the loan as repaid.
+			log.Printf("Error getting loan details for ID %d: %v", id, err)
+
+			// Mark the loan as repaid even if we couldn't get details.
 			_, err = db.Exec("UPDATE loans SET repaid = 1 WHERE loan_id = ? AND user_id = ?", id, chatID)
 			if err != nil {
+				log.Printf("Error marking loan %d as repaid: %v", id, err)
 				sendMessage(bot, chatID, fmt.Sprintf("❌ Не удалось отметить займ как возвращенный: %v", err))
 				return
 			}
@@ -279,11 +332,14 @@ func handleRepayStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text string
 		}
 
 		// Delete conversation BEFORE sending main menu
+		log.Printf("Successfully marked loan %d as repaid for user %d", id, chatID)
 		delete(conversations, chatID)
 		sendMainMenu(bot, chatID)
 	default:
+		log.Printf("Unknown repay step %d for user %d", conv.Step, chatID)
 		sendMessage(bot, chatID, "❌ Произошла ошибка в процессе регистрации возврата. Пожалуйста, попробуйте снова.")
 		delete(conversations, chatID)
+		sendMainMenu(bot, chatID)
 	}
 }
 
@@ -322,8 +378,16 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, db *sql.DB, cq *tgbotapi.Callback
 	data := cq.Data
 	chatID := cq.Message.Chat.ID
 
+	log.Printf("Received callback query from %d: %s", chatID, data)
+
 	// First respond to the callback to stop "loading" indicator
 	bot.Request(tgbotapi.NewCallback(cq.ID, ""))
+
+	// Edit the message that contained the inline keyboard to remove the keyboard
+	// This prevents the user from clicking the buttons multiple times
+	edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, cq.Message.Text)
+	edit.ReplyMarkup = nil
+	bot.Send(edit)
 
 	switch data {
 	case "menu_addloan":
@@ -335,16 +399,30 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, db *sql.DB, cq *tgbotapi.Callback
 		endConversation(chatID)
 		startRepayConversation(chatID)
 	case "menu_balance":
+		// No need for conversation for balance
+		endConversation(chatID)
 		showBalance(bot, db, chatID)
+		// Show main menu again after displaying balance
+		sendMainMenu(bot, chatID)
 	case "menu_stats":
+		// No need for conversation for stats
+		endConversation(chatID)
 		showStats(bot, db, chatID)
+		// Show main menu again after displaying stats
+		sendMainMenu(bot, chatID)
 	default:
+		log.Printf("Unknown callback data: %s", data)
 		sendMessage(bot, chatID, "❌ Неизвестная опция. Попробуйте снова.")
+		sendMainMenu(bot, chatID)
 	}
 }
 
 // startAddLoanConversation initializes a conversation for adding a loan.
 func startAddLoanConversation(chatID int64) {
+	// First send the initial prompt to request borrower name
+	sendMessage(bot, chatID, "📝 Давайте запишем новый займ.\n👤 Введите имя заемщика:")
+
+	// Then create the conversation - this order ensures the user sees the prompt first
 	convMutex.Lock()
 	conversations[chatID] = &Conversation{
 		Operation: "addloan",
@@ -352,11 +430,16 @@ func startAddLoanConversation(chatID int64) {
 		Data:      make(map[string]string),
 	}
 	convMutex.Unlock()
-	sendMessage(bot, chatID, "📝 Давайте запишем новый займ.\n👤 Введите имя заемщика:")
+
+	log.Printf("Started add loan conversation for user %d", chatID)
 }
 
 // startRepayConversation initializes a conversation for recording a repayment.
 func startRepayConversation(chatID int64) {
+	// First send the initial prompt to request loan ID
+	sendMessage(bot, chatID, "💵 Давайте запишем возврат.\n🔢 Введите ID займа, который нужно отметить как возвращенный:")
+
+	// Then create the conversation - this order ensures the user sees the prompt first
 	convMutex.Lock()
 	conversations[chatID] = &Conversation{
 		Operation: "repay",
@@ -364,7 +447,8 @@ func startRepayConversation(chatID int64) {
 		Data:      make(map[string]string),
 	}
 	convMutex.Unlock()
-	sendMessage(bot, chatID, "💵 Давайте запишем возврат.\n🔢 Введите ID займа, который нужно отметить как возвращенный:")
+
+	log.Printf("Started repay conversation for user %d", chatID)
 }
 
 // showBalance retrieves and displays the user's active loans.
@@ -391,13 +475,13 @@ func showBalance(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64) {
 		}
 		totalAmount += amount
 		loanCount++
-		response.WriteString(fmt.Sprintf("🆔 Займ #%d\n👤 Заемщик: %s\n💰 Сумма: %.2f ₽\n➖➖➖➖➖➖➖➖➖➖\n\n", id, borrower, amount))
+		response.WriteString(fmt.Sprintf("🆔 Займ #%d\n👤 Заемщик: %s\n💰 Сумма: %.2f ₸\n➖➖➖➖➖➖➖➖➖➖\n\n", id, borrower, amount))
 	}
 
 	if loanCount == 0 {
 		response.WriteString("У вас нет активных займов! 🎉")
 	} else {
-		response.WriteString(fmt.Sprintf("💼 Общая сумма активных займов: %.2f ₽", totalAmount))
+		response.WriteString(fmt.Sprintf("💼 Общая сумма активных займов: %.2f ₸", totalAmount))
 	}
 	sendMessage(bot, chatID, response.String())
 }
@@ -423,7 +507,7 @@ func showStats(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64) {
 	stats := fmt.Sprintf(
 		"📈 Статистика займов:\n\n"+
 			"🔢 Всего займов: %d\n"+
-			"💰 Всего выдано: %.2f ₽\n"+
+			"💰 Всего выдано: %.2f ₸\n"+
 			"✅ Возвращено займов: %d\n"+
 			"⏳ Ожидают возврата: %d\n\n"+
 			"〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️",
@@ -471,7 +555,7 @@ func reminderScheduler(bot *tgbotapi.BotAPI, db *sql.DB) {
 				if err := loanRows.Scan(&id, &borrower, &amount); err != nil {
 					continue
 				}
-				reminderMsg += fmt.Sprintf("🆔 Займ #%d - %s: %.2f ₽\n", id, borrower, amount)
+				reminderMsg += fmt.Sprintf("🆔 Займ #%d - %s: %.2f ₸\n", id, borrower, amount)
 			}
 			loanRows.Close()
 			sendMessage(bot, userID, reminderMsg)
