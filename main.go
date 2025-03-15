@@ -657,13 +657,13 @@ func (m *BotManager) HandleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		// Display edit options
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("👤 Изменить имя", fmt.Sprintf("edit_name_%d", loanID)),
+				tgbotapi.NewInlineKeyboardButtonData("👤 Изменить имя", fmt.Sprintf("name_%d", loanID)),
 			),
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("💰 Изменить сумму", fmt.Sprintf("edit_amount_%d", loanID)),
+				tgbotapi.NewInlineKeyboardButtonData("💰 Изменить сумму", fmt.Sprintf("amount_%d", loanID)),
 			),
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("📝 Изменить цель", fmt.Sprintf("edit_purpose_%d", loanID)),
+				tgbotapi.NewInlineKeyboardButtonData("📝 Изменить цель", fmt.Sprintf("purpose_%d", loanID)),
 			),
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("🔙 Назад", "back_to_manage"),
@@ -677,9 +677,9 @@ func (m *BotManager) HandleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		msg.ReplyMarkup = keyboard
 		m.bot.Send(msg)
 
-	case strings.HasPrefix(data, "edit_name_"):
-		// Extract loan ID from callback data (format: "edit_name_123")
-		loanIDStr := strings.TrimPrefix(data, "edit_name_")
+	case strings.HasPrefix(data, "name_"):
+		// Extract loan ID from callback data (format: "name_123")
+		loanIDStr := strings.TrimPrefix(data, "name_")
 		log.Printf("Editing name: original callback data=%s, extracted ID=%s", data, loanIDStr)
 
 		// Validate the loan ID
@@ -708,9 +708,9 @@ func (m *BotManager) HandleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		// Prompt for new name
 		m.SendMessage(chatID, "Введите новое имя заемщика:")
 
-	case strings.HasPrefix(data, "edit_amount_"):
-		// Extract loan ID from callback data (format: "edit_amount_123")
-		loanIDStr := strings.TrimPrefix(data, "edit_amount_")
+	case strings.HasPrefix(data, "amount_"):
+		// Extract loan ID from callback data (format: "amount_123")
+		loanIDStr := strings.TrimPrefix(data, "amount_")
 		log.Printf("Editing amount: original callback data=%s, extracted ID=%s", data, loanIDStr)
 
 		// Validate the loan ID
@@ -739,9 +739,9 @@ func (m *BotManager) HandleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		// Prompt for new amount
 		m.SendMessage(chatID, "Введите новую сумму займа (целое число):")
 
-	case strings.HasPrefix(data, "edit_purpose_"):
-		// Extract loan ID from callback data (format: "edit_purpose_123")
-		loanIDStr := strings.TrimPrefix(data, "edit_purpose_")
+	case strings.HasPrefix(data, "purpose_"):
+		// Extract loan ID from callback data (format: "purpose_123")
+		loanIDStr := strings.TrimPrefix(data, "purpose_")
 		log.Printf("Editing purpose: original callback data=%s, extracted ID=%s", data, loanIDStr)
 
 		// Validate the loan ID
