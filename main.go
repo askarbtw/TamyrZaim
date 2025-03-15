@@ -104,7 +104,7 @@ func handleMessage(bot *tgbotapi.BotAPI, db *sql.DB, message *tgbotapi.Message) 
 			sendMainMenu(bot, chatID)
 			return
 		default:
-			sendMessage(bot, chatID, "Unknown command. Please use /start.")
+			sendMessage(bot, chatID, "🤔 Неизвестная команда. Используйте /start для начала работы.")
 			return
 		}
 	}
@@ -139,26 +139,26 @@ func handleAddLoanStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text stri
 	case 0:
 		// Ask for borrower's name.
 		if text == "" {
-			sendMessage(bot, chatID, "Borrower's name cannot be empty. Please enter a valid name:")
+			sendMessage(bot, chatID, "❌ Имя заемщика не может быть пустым. Пожалуйста, введите корректное имя:")
 			return
 		}
 		conv.Data["borrower_name"] = text
 		conv.Step++
-		sendMessage(bot, chatID, "Enter loan amount (e.g., 100.50):")
+		sendMessage(bot, chatID, "💰 Введите сумму займа (например, 100.50):")
 	case 1:
 		// Validate and save loan amount.
 		amount, err := strconv.ParseFloat(text, 64)
 		if err != nil {
-			sendMessage(bot, chatID, "Invalid amount. Please enter a valid number (e.g., 100.50):")
+			sendMessage(bot, chatID, "❌ Некорректная сумма. Пожалуйста, введите корректное число (например, 100.50):")
 			return
 		}
 		conv.Data["amount"] = fmt.Sprintf("%.2f", amount)
 		conv.Step++
-		sendMessage(bot, chatID, "Enter the purpose of the loan:")
+		sendMessage(bot, chatID, "📝 Введите цель займа:")
 	case 2:
 		// Save purpose and complete recording process.
 		if text == "" {
-			sendMessage(bot, chatID, "Purpose cannot be empty. Please enter a valid purpose:")
+			sendMessage(bot, chatID, "❌ Цель займа не может быть пустой. Пожалуйста, введите корректную цель:")
 			return
 		}
 		conv.Data["purpose"] = text
@@ -166,7 +166,7 @@ func handleAddLoanStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text stri
 		var newLoanID int
 		err := db.QueryRow("SELECT COALESCE(MAX(loan_id), 0) + 1 FROM loans WHERE user_id = ?", chatID).Scan(&newLoanID)
 		if err != nil {
-			sendMessage(bot, chatID, fmt.Sprintf("Error generating loan ID: %v", err))
+			sendMessage(bot, chatID, fmt.Sprintf("❌ Ошибка при создании ID займа: %v", err))
 			return
 		}
 
@@ -174,20 +174,27 @@ func handleAddLoanStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text stri
 		query := `INSERT INTO loans (user_id, loan_id, borrower_name, amount, purpose, repaid) VALUES (?, ?, ?, ?, ?, 0)`
 		_, err = db.Exec(query, chatID, newLoanID, conv.Data["borrower_name"], conv.Data["amount"], conv.Data["purpose"])
 		if err != nil {
-			sendMessage(bot, chatID, fmt.Sprintf("Failed to record loan: %v", err))
+			sendMessage(bot, chatID, fmt.Sprintf("❌ Не удалось зарегистрировать займ: %v", err))
 			return
 		}
 
-		sendMessage(bot, chatID, fmt.Sprintf(
-			"Loan successfully recorded!\n\nBorrower: %s\nAmount: %sKZT\nPurpose: %s",
+		successMsg := fmt.Sprintf(
+			"✅ Займ успешно зарегистрирован!\n\n"+
+				"👤 Заемщик: %s\n"+
+				"💰 Сумма: %s ₽\n"+
+				"🎯 Цель: %s\n"+
+				"🆔 ID займа: %d\n\n"+
+				"〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️",
 			conv.Data["borrower_name"],
 			conv.Data["amount"],
 			conv.Data["purpose"],
-		))
+			newLoanID,
+		)
+		sendMessage(bot, chatID, successMsg)
 		endConversation(chatID)
 		sendMainMenu(bot, chatID)
 	default:
-		sendMessage(bot, chatID, "An error occurred in the add loan process. Please try again.")
+		sendMessage(bot, chatID, "❌ Произошла ошибка в процессе добавления займа. Пожалуйста, попробуйте снова.")
 		endConversation(chatID)
 	}
 }
@@ -198,14 +205,14 @@ func handleRepayStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text string
 	case 0:
 		// Ask for Loan ID to mark as repaid.
 		if text == "" {
-			sendMessage(bot, chatID, "Please enter a valid Loan ID:")
+			sendMessage(bot, chatID, "❌ Пожалуйста, введите корректный ID займа:")
 			return
 		}
 		conv.Data["loan_id"] = text
 		conv.Step++
 		id, err := strconv.Atoi(text)
 		if err != nil {
-			sendMessage(bot, chatID, "Invalid Loan ID. Please enter a valid number:")
+			sendMessage(bot, chatID, "❌ Некорректный ID займа. Пожалуйста, введите корректное число:")
 			return
 		}
 		// Check if loan exists and belongs to user.
@@ -213,21 +220,46 @@ func handleRepayStep(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64, text string
 		row := db.QueryRow("SELECT EXISTS(SELECT 1 FROM loans WHERE loan_id = ? AND user_id = ? AND repaid = 0)", id, chatID)
 		err = row.Scan(&exists)
 		if err != nil || !exists {
-			sendMessage(bot, chatID, "Loan not found or already repaid. Please try again with a valid Loan ID.")
+			sendMessage(bot, chatID, "❌ Займ не найден или уже был возвращен. Пожалуйста, попробуйте снова с корректным ID займа.")
 			endConversation(chatID)
 			return
 		}
-		// Mark the loan as repaid.
-		_, err = db.Exec("UPDATE loans SET repaid = 1 WHERE loan_id = ? AND user_id = ?", id, chatID)
-		if err != nil {
-			sendMessage(bot, chatID, fmt.Sprintf("Failed to mark loan as repaid: %v", err))
-			return
+
+		// Get loan details for confirmation
+		var borrowerName string
+		var amount float64
+		err = db.QueryRow("SELECT borrower_name, amount FROM loans WHERE loan_id = ? AND user_id = ?", id, chatID).Scan(&borrowerName, &amount)
+		if err == nil {
+			confirmMsg := fmt.Sprintf(
+				"📌 Подтверждаем возврат займа:\n\n"+
+					"🆔 ID займа: %d\n"+
+					"👤 Заемщик: %s\n"+
+					"💰 Сумма: %.2f ₽\n\n"+
+					"✅ Займ отмечен как возвращенный!",
+				id, borrowerName, amount,
+			)
+
+			// Mark the loan as repaid.
+			_, err = db.Exec("UPDATE loans SET repaid = 1 WHERE loan_id = ? AND user_id = ?", id, chatID)
+			if err != nil {
+				sendMessage(bot, chatID, fmt.Sprintf("❌ Не удалось отметить займ как возвращенный: %v", err))
+				return
+			}
+			sendMessage(bot, chatID, confirmMsg)
+		} else {
+			// Mark the loan as repaid.
+			_, err = db.Exec("UPDATE loans SET repaid = 1 WHERE loan_id = ? AND user_id = ?", id, chatID)
+			if err != nil {
+				sendMessage(bot, chatID, fmt.Sprintf("❌ Не удалось отметить займ как возвращенный: %v", err))
+				return
+			}
+			sendMessage(bot, chatID, fmt.Sprintf("✅ Займ с ID %d отмечен как возвращенный!", id))
 		}
-		sendMessage(bot, chatID, fmt.Sprintf("Loan ID %d has been marked as repaid. 🎉", id))
+
 		endConversation(chatID)
 		sendMainMenu(bot, chatID)
 	default:
-		sendMessage(bot, chatID, "An error occurred in the repayment process. Please try again.")
+		sendMessage(bot, chatID, "❌ Произошла ошибка в процессе регистрации возврата. Пожалуйста, попробуйте снова.")
 		endConversation(chatID)
 	}
 }
@@ -243,15 +275,15 @@ func endConversation(chatID int64) {
 func sendMainMenu(bot *tgbotapi.BotAPI, chatID int64) {
 	menuButtons := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Record Loan", "menu_addloan"),
-			tgbotapi.NewInlineKeyboardButtonData("Record Repayment", "menu_repay"),
+			tgbotapi.NewInlineKeyboardButtonData("💰 Записать займ", "menu_addloan"),
+			tgbotapi.NewInlineKeyboardButtonData("✅ Записать возврат", "menu_repay"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Balance", "menu_balance"),
-			tgbotapi.NewInlineKeyboardButtonData("Stats", "menu_stats"),
+			tgbotapi.NewInlineKeyboardButtonData("📊 Баланс", "menu_balance"),
+			tgbotapi.NewInlineKeyboardButtonData("📈 Статистика", "menu_stats"),
 		),
 	)
-	msg := tgbotapi.NewMessage(chatID, "Please choose an option:")
+	msg := tgbotapi.NewMessage(chatID, "🤖 Выберите действие:")
 	msg.ReplyMarkup = menuButtons
 	bot.Send(msg)
 }
@@ -270,19 +302,19 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, db *sql.DB, cq *tgbotapi.Callback
 	switch data {
 	case "menu_addloan":
 		startAddLoanConversation(chatID)
-		bot.Request(tgbotapi.NewCallback(cq.ID, "Starting loan recording..."))
+		bot.Request(tgbotapi.NewCallback(cq.ID, "Начинаем запись займа..."))
 	case "menu_repay":
 		startRepayConversation(chatID)
-		bot.Request(tgbotapi.NewCallback(cq.ID, "Starting repayment recording..."))
+		bot.Request(tgbotapi.NewCallback(cq.ID, "Начинаем запись возврата..."))
 	case "menu_balance":
 		showBalance(bot, db, chatID)
-		bot.Request(tgbotapi.NewCallback(cq.ID, "Fetching your balance..."))
+		bot.Request(tgbotapi.NewCallback(cq.ID, "Получаем ваш баланс..."))
 	case "menu_stats":
 		showStats(bot, db, chatID)
-		bot.Request(tgbotapi.NewCallback(cq.ID, "Fetching your stats..."))
+		bot.Request(tgbotapi.NewCallback(cq.ID, "Получаем вашу статистику..."))
 	default:
-		sendMessage(bot, chatID, "Unknown option. Please try again.")
-		bot.Request(tgbotapi.NewCallback(cq.ID, "Unknown option selected."))
+		sendMessage(bot, chatID, "❌ Неизвестная опция. Попробуйте снова.")
+		bot.Request(tgbotapi.NewCallback(cq.ID, "Выбрана неизвестная опция."))
 	}
 }
 
@@ -295,7 +327,7 @@ func startAddLoanConversation(chatID int64) {
 		Data:      make(map[string]string),
 	}
 	convMutex.Unlock()
-	sendMessage(bot, chatID, "Let's record a new loan.\nEnter borrower's name:")
+	sendMessage(bot, chatID, "📝 Давайте запишем новый займ.\n👤 Введите имя заемщика:")
 }
 
 // startRepayConversation initializes a conversation for recording a repayment.
@@ -307,21 +339,22 @@ func startRepayConversation(chatID int64) {
 		Data:      make(map[string]string),
 	}
 	convMutex.Unlock()
-	sendMessage(bot, chatID, "Let's record a repayment.\nEnter the Loan ID to mark as repaid:")
+	sendMessage(bot, chatID, "💵 Давайте запишем возврат.\n🔢 Введите ID займа, который нужно отметить как возвращенный:")
 }
 
 // showBalance retrieves and displays the user's active loans.
 func showBalance(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64) {
 	rows, err := db.Query("SELECT loan_id, borrower_name, amount FROM loans WHERE user_id = ? AND repaid = 0", chatID)
 	if err != nil {
-		sendMessage(bot, chatID, fmt.Sprintf("Error retrieving balance: %v", err))
+		sendMessage(bot, chatID, fmt.Sprintf("❌ Ошибка при получении баланса: %v", err))
 		return
 	}
 	defer rows.Close()
 
 	var response strings.Builder
-	response.WriteString("📊 Active Loans:\n")
+	response.WriteString("📊 Активные займы:\n\n")
 	var totalAmount float64
+	loanCount := 0
 
 	for rows.Next() {
 		var id int
@@ -332,10 +365,15 @@ func showBalance(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64) {
 			continue
 		}
 		totalAmount += amount
-		response.WriteString(fmt.Sprintf("💳 Loan ID: %d\n👤 Borrower: %s\n💰 Amount: %.2fKZT\n\n", id, borrower, amount))
+		loanCount++
+		response.WriteString(fmt.Sprintf("🆔 Займ #%d\n👤 Заемщик: %s\n💰 Сумма: %.2f ₽\n➖➖➖➖➖➖➖➖➖➖\n\n", id, borrower, amount))
 	}
 
-	response.WriteString(fmt.Sprintf("💼 Total Active Loan Amount: %.2fKZT", totalAmount))
+	if loanCount == 0 {
+		response.WriteString("У вас нет активных займов! 🎉")
+	} else {
+		response.WriteString(fmt.Sprintf("💼 Общая сумма активных займов: %.2f ₽", totalAmount))
+	}
 	sendMessage(bot, chatID, response.String())
 }
 
@@ -347,22 +385,23 @@ func showStats(bot *tgbotapi.BotAPI, db *sql.DB, chatID int64) {
 
 	err := db.QueryRow("SELECT COUNT(*), SUM(amount) FROM loans WHERE user_id = ?", chatID).Scan(&totalLoans, &totalLent)
 	if err != nil {
-		sendMessage(bot, chatID, fmt.Sprintf("Error generating stats: %v", err))
+		sendMessage(bot, chatID, fmt.Sprintf("❌ Ошибка при формировании статистики: %v", err))
 		return
 	}
 
 	err = db.QueryRow("SELECT COUNT(*) FROM loans WHERE user_id = ? AND repaid = 1", chatID).Scan(&totalRepaid)
 	if err != nil {
-		sendMessage(bot, chatID, fmt.Sprintf("Error generating stats: %v", err))
+		sendMessage(bot, chatID, fmt.Sprintf("❌ Ошибка при формировании статистики: %v", err))
 		return
 	}
 
 	stats := fmt.Sprintf(
-		"📈 Lending Stats:\n\n"+
-			"🔢 Total Loans: %d\n"+
-			"💰 Total Lent: %.2fKZT\n"+
-			"✅ Loans Repaid: %d\n"+
-			"📊 Loans Pending: %d",
+		"📈 Статистика займов:\n\n"+
+			"🔢 Всего займов: %d\n"+
+			"💰 Всего выдано: %.2f ₽\n"+
+			"✅ Возвращено займов: %d\n"+
+			"⏳ Ожидают возврата: %d\n\n"+
+			"〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️",
 		totalLoans,
 		totalLent,
 		totalRepaid,
@@ -395,7 +434,7 @@ func reminderScheduler(bot *tgbotapi.BotAPI, db *sql.DB) {
 
 		// For each user, compile a reminder message and send it.
 		for _, userID := range userIDs {
-			reminderMsg := "⏰ Weekly Reminder: You have pending loans:\n"
+			reminderMsg := "⏰ Еженедельное напоминание: У вас есть активные займы:\n\n"
 			loanRows, err := db.Query("SELECT loan_id, borrower_name, amount FROM loans WHERE user_id = ? AND repaid = 0", userID)
 			if err != nil {
 				continue
@@ -407,7 +446,7 @@ func reminderScheduler(bot *tgbotapi.BotAPI, db *sql.DB) {
 				if err := loanRows.Scan(&id, &borrower, &amount); err != nil {
 					continue
 				}
-				reminderMsg += fmt.Sprintf("Loan ID %d - %s: %.2fKZT\n", id, borrower, amount)
+				reminderMsg += fmt.Sprintf("🆔 Займ #%d - %s: %.2f ₽\n", id, borrower, amount)
 			}
 			loanRows.Close()
 			sendMessage(bot, userID, reminderMsg)
