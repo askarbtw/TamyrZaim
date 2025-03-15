@@ -700,8 +700,8 @@ func (m *BotManager) HandleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 			return
 		}
 
-		// Save the loan ID and set the operation state
-		m.SaveStateData(chatID, "loan_id", loanIDStr)
+		// Save the pure numeric loan ID and set the operation state
+		m.SaveStateData(chatID, "loan_id", loanIDStr) // Store just the numeric ID
 		m.SaveStateData(chatID, "edit_field", "name")
 		m.SetState(chatID, OpEditLoan, 1)
 
@@ -731,8 +731,8 @@ func (m *BotManager) HandleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 			return
 		}
 
-		// Save the loan ID and set the operation state
-		m.SaveStateData(chatID, "loan_id", loanIDStr)
+		// Save the pure numeric loan ID and set the operation state
+		m.SaveStateData(chatID, "loan_id", loanIDStr) // Store just the numeric ID
 		m.SaveStateData(chatID, "edit_field", "amount")
 		m.SetState(chatID, OpEditLoan, 1)
 
@@ -762,8 +762,8 @@ func (m *BotManager) HandleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 			return
 		}
 
-		// Save the loan ID and set the operation state
-		m.SaveStateData(chatID, "loan_id", loanIDStr)
+		// Save the pure numeric loan ID and set the operation state
+		m.SaveStateData(chatID, "loan_id", loanIDStr) // Store just the numeric ID
 		m.SaveStateData(chatID, "edit_field", "purpose")
 		m.SetState(chatID, OpEditLoan, 1)
 
@@ -1489,15 +1489,7 @@ func (m *BotManager) HandleEditLoanStep(chatID int64, text string) {
 	// Get stored loan ID and edit field
 	loanIDStr, _ := m.GetStateData(chatID, "loan_id")
 
-	// Check if the loan ID string contains a prefix that needs to be removed
-	if strings.Contains(loanIDStr, "amount_") {
-		loanIDStr = strings.TrimPrefix(loanIDStr, "amount_")
-	} else if strings.Contains(loanIDStr, "name_") {
-		loanIDStr = strings.TrimPrefix(loanIDStr, "name_")
-	} else if strings.Contains(loanIDStr, "purpose_") {
-		loanIDStr = strings.TrimPrefix(loanIDStr, "purpose_")
-	}
-
+	// Convert the stored ID to integer
 	loanID, err := strconv.Atoi(loanIDStr)
 	if err != nil {
 		log.Printf("Error converting loan ID: %v", err)
